@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avenger Card Battle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=Poppins:wght@600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --type-grass: #4ade80;
+            --type-fire: #f87171;
+            --type-water: #60a5fa;
+            --type-electric: #facc15;
+            --type-psychic: #c084fc;
+            --type-normal: #94a3b8;
+        }
+        body { 
+            font-family: 'Noto Sans JP', sans-serif; 
+            background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+            color: white; 
+            overflow: hidden; 
+            touch-action: manipulation;
+        }
+        .font-poppins { font-family: 'Poppins', sans-serif; }
+
+        .tcg-card {
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transform-style: preserve-3d;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            border: 5px solid #cbd5e1;
+            background-color: #f8fafc;
+            color: #0f172a;
+        }
+        .tcg-card:hover { box-shadow: 0 10px 15px -5px rgba(0, 0, 0, 0.6); }
+        .tcg-card.selected {
+            transform: translateY(-10px);
+            border-color: #fbbf24;
+            box-shadow: 0 0 15px 5px rgba(251, 191, 36, 0.4);
+            z-index: 50;
+        }
+        
+        /* 手札がスクロールして見えるように調整 */
+        .hand-container { 
+            display: flex; 
+            justify-content: flex-start; 
+            padding: 1rem; 
+            overflow-x: auto; 
+            gap: 0.5rem; 
+        }
+        .hand-container::-webkit-scrollbar { height: 8px; }
+        .hand-container::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        .hand-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.4); border-radius: 4px; }
+        .hand-item { flex-shrink: 0; cursor: pointer; transition: 0.2s; }
+        .hand-item:hover { transform: translateY(-10px); z-index: 10; }
+
+        .slot { 
+            border: 3px dashed rgba(255,255,255,0.2); 
+            background: rgba(0,0,0,0.2); 
+            border-radius: 0.75rem; 
+            display: flex; align-items: center; justify-content: center; 
+            transition: all 0.2s;
+        }
+        .slot.droppable:hover { border-color: #fbbf24; background: rgba(251, 191, 36, 0.1); cursor: pointer; }
+
+        @keyframes attackTackle {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(-30px) scale(1.1); }
+            100% { transform: translateY(0); }
+        }
+        @keyframes attackTackleOpp {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(30px) scale(1.1); }
+            100% { transform: translateY(0); }
+        }
+        .anim-attack { animation: attackTackle 0.4s ease-in-out; }
+        .anim-attack-opp { animation: attackTackleOpp 0.4s ease-in-out; }
+
+        /* パック開封アニメーション用 */
+        @keyframes openPack {
+            0% { transform: scale(1) rotate(0deg); opacity: 1; }
+            20% { transform: scale(1.1) rotate(-5deg); }
+            40% { transform: scale(1.1) rotate(5deg); }
+            60% { transform: scale(1.2) rotate(-5deg); }
+            80% { transform: scale(1.3) rotate(5deg); opacity: 1;}
+            100% { transform: scale(2) rotate(0deg); opacity: 0; display:none; }
+        }
+        .anim-pack-open { animation: openPack 1s ease-in-out forwards; pointer-events: none; }
+        
+        @keyframes popOut {
+            from { transform: scale(0); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .anim-pop-out { animation: popOut 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        /* Toast */
+        @keyframes slideInUp { from { transform: translate(-50%, 100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+        .toast { animation: slideInUp 0.3s ease-out forwards; left: 50%; transform: translateX(-50%); }
+
+        /* Collection Grid */
+        .collection-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1rem;
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: calc(100vh - 120px);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col">
+
+    <header class="bg-slate-900/80 backdrop-blur-md shadow-lg p-3 flex justify-between items-center border-b border-slate-700 z-50">
+        <div class="flex items-center gap-4">
+            <h1 class="text-2xl font-poppins font-black italic text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500 tracking-wider hidden sm:block">
+                AVENGER <span class="text-sm font-normal text-slate-300 not-italic">CARD BATTLE</span>
+            </h1>
+            <button id="btn-home" onclick="switchScreen('home')" class="bg-slate-800 hover:bg-slate-700 text-white p-2 rounded-full shadow transition border border-slate-600">
+                🏠
+            </button>
+        </div>
+        <div id="auth-section" class="flex items-center gap-3">
+            <span id="user-name" class="hidden text-sm font-bold text-slate-200 bg-slate-800 px-3 py-1 rounded-full border border-slate-600"></span>
+            <button id="btn-login" class="bg-white text-slate-900 font-bold py-1.5 px-4 rounded shadow-md hover:bg-slate-200 transition flex items-center gap-2 text-sm">
+                Googleログイン
+            </button>
+            <button id="btn-logout" class="hidden bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500 hover:text-white font-bold py-1.5 px-3 rounded transition text-sm">
+                ログアウト
+            </button>
+        </div>
+    </header>
+
+    <main id="main-content" class="flex-1 flex flex-col relative w-full max-w-6xl mx-auto overflow-hidden">
+        
+        <!-- Login Overlay -->
+        <div id="login-overlay" class="absolute inset-0 z-40 bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center">
+            <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 text-center max-w-md w-full mx-4">
+                <div class="w-20 h-20 bg-gradient-to-tr from-yellow-400 to-red-500 rounded-full mx-auto mb-6 shadow-lg flex items-center justify-center text-4xl">⚡</div>
+                <h2 class="text-2xl font-bold mb-2">Avenger Card Battle</h2>
+                <p class="text-slate-400 mb-6 text-sm">Googleアカウントでログインしてプレイ開始！</p>
+            </div>
+        </div>
+
+        <!-- HOME SCREEN -->
+        <div id="screen-home" class="flex-1 flex flex-col items-center justify-center p-6 gap-6 hidden">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold mb-2">ホーム</h2>
+                <p class="text-slate-400">遊ぶモードを選択してください</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl">
+                <button onclick="startBattle()" class="group relative bg-gradient-to-br from-red-600 to-orange-600 rounded-2xl p-8 shadow-xl border border-red-400 hover:scale-105 transition-transform overflow-hidden flex flex-col items-center">
+                    <span class="text-5xl mb-4">⚔️</span>
+                    <h3 class="text-2xl font-black mb-2">バトル (CPU戦)</h3>
+                    <p class="text-red-100 text-sm opacity-80 group-hover:opacity-100">CPUとカードバトルを行います</p>
+                </button>
+
+                <button onclick="switchScreen('pack')" class="group relative bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl p-8 shadow-xl border border-blue-400 hover:scale-105 transition-transform overflow-hidden flex flex-col items-center">
+                    <span class="text-5xl mb-4">🎁</span>
+                    <h3 class="text-2xl font-black mb-2">パック開封</h3>
+                    <p class="text-blue-100 text-sm opacity-80 group-hover:opacity-100">新しいカードを手に入れます</p>
+                </button>
+
+                <button onclick="switchScreen('collection')" class="group relative bg-gradient-to-br from-emerald-600 to-teal-600 rounded-2xl p-8 shadow-xl border border-emerald-400 hover:scale-105 transition-transform overflow-hidden flex flex-col items-center">
+                    <span class="text-5xl mb-4">📖</span>
+                    <h3 class="text-2xl font-black mb-2">コレクション</h3>
+                    <p class="text-emerald-100 text-sm opacity-80 group-hover:opacity-100">集めたカードを確認します</p>
+                </button>
+            </div>
+        </div>
+
+        <!-- COLLECTION SCREEN -->
+        <div id="screen-collection" class="flex-1 flex flex-col hidden h-full">
+            <div class="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-center">
+                <h2 class="text-xl font-bold">カードコレクション</h2>
+                <span class="text-slate-400 text-sm">所持枚数: <span id="collection-count">0</span>枚</span>
+            </div>
+            <div id="collection-grid" class="collection-grid flex-1">
+                <!-- カードがここに生成される -->
+            </div>
+        </div>
+
+        <!-- PACK OPEN SCREEN -->
+        <div id="screen-pack" class="flex-1 flex flex-col items-center justify-center hidden relative">
+            <div id="pack-area" class="text-center z-10">
+                <h2 class="text-2xl font-bold mb-8">ブースターパック開封</h2>
+                
+                <div id="pack-visual" class="w-48 h-64 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-xl shadow-2xl mx-auto mb-8 border-4 border-white/20 flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform relative overflow-hidden" onclick="executeOpenPack()">
+                    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20"></div>
+                    <span class="text-6xl mb-2 drop-shadow-lg text-white">⚡</span>
+                    <span class="text-xl font-black italic tracking-widest text-white drop-shadow-md">AVENGER</span>
+                    <span class="text-sm font-bold text-white/80">BASE SET</span>
+                </div>
+
+                <p class="text-slate-400 mb-4">パックをクリックして開封！</p>
+            </div>
+
+            <!-- 開封結果表示エリア -->
+            <div id="pack-result-area" class="absolute inset-0 bg-slate-900/95 z-20 flex flex-col items-center justify-center hidden">
+                <h3 class="text-3xl font-black mb-10 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]">GET CARDS!</h3>
+                <div id="opened-cards" class="flex flex-wrap justify-center gap-4 px-4 mb-10 max-w-4xl">
+                    <!-- 引いたカードが表示される -->
+                </div>
+                <button onclick="resetPackScreen()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-full shadow-lg border border-slate-500 transition-colors">
+                    戻る
+                </button>
+            </div>
+        </div>
+
+        <!-- BATTLE SCREEN -->
+        <div id="screen-battle" class="flex-1 flex-col hidden h-full relative">
+            <!-- CPU Field -->
+            <div class="h-1/3 min-h-[160px] bg-red-900/20 border-b border-red-500/30 flex flex-col justify-between p-2">
+                <div class="flex justify-between items-start">
+                    <div class="flex gap-2" id="opp-bench-slots">
+                        <!-- CPU Bench -->
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xs font-bold text-red-400 tracking-widest">CPU OPPONENT</p>
+                        <p class="text-xs text-slate-400">山札: <span id="opp-deck-count">0</span> | 手札: <span id="opp-hand-count">0</span></p>
+                    </div>
+                </div>
+                <div class="flex justify-center">
+                    <div id="opp-active-slot" class="w-24 h-36 bg-slate-800/50 rounded border-2 border-red-500/30 shadow-inner flex items-center justify-center relative">
+                        <span class="text-slate-500 text-xs font-bold">CPU BATTLE</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Field -->
+            <div class="flex-1 flex flex-col p-2 justify-between bg-blue-900/10">
+                <div class="flex justify-between items-center w-full mt-2">
+                    
+                    <div class="w-32 flex flex-col items-start gap-2">
+                        <!-- Turn Indicator -->
+                        <div id="turn-indicator" class="text-sm font-bold px-3 py-1 rounded bg-slate-700 text-white border border-slate-500">
+                            準備中...
+                        </div>
+                        <button onclick="endTurn()" id="btn-end-turn" class="text-xs bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded border border-slate-500 transition shadow-sm w-full hidden">
+                            ⏭ ターン終了
+                        </button>
+                        <button onclick="startBattle()" class="text-xs bg-red-800 hover:bg-red-700 text-red-200 py-1 px-2 rounded border border-red-600 transition shadow-sm mt-4">
+                            🔄 降参(リセット)
+                        </button>
+                    </div>
+
+                    <!-- Active Slot -->
+                    <div class="flex flex-col items-center">
+                        <div id="player-active-slot" class="slot droppable w-28 h-40 sm:w-32 sm:h-44 relative" onclick="playToSlot('active')">
+                            <span class="text-slate-400 text-sm font-bold pointer-events-none">自分のバトル場</span>
+                        </div>
+                        <button id="btn-attack" onclick="attack()" class="mt-3 hidden bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-400 hover:to-orange-400 text-white font-bold py-1.5 px-6 rounded-full shadow-lg transform transition active:scale-95 border-2 border-red-300">
+                            ⚔️ 攻撃する！
+                        </button>
+                    </div>
+
+                    <!-- Deck Area -->
+                    <div class="w-32 flex flex-col items-end">
+                        <p class="text-xs text-slate-400 mb-1 font-bold">自分の山札: <span id="player-deck-count" class="text-white">0</span>枚</p>
+                        <div class="w-20 h-28 bg-blue-700 rounded-xl border-4 border-blue-400 shadow-[0_4px_0_#1e3a8a] flex items-center justify-center relative opacity-80">
+                            <span class="text-blue-200 font-black text-xl">DECK</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 flex flex-col">
+                    <p class="text-xs text-slate-400 mb-1 font-bold px-2">自分のベンチ (最大5体)</p>
+                    <div class="flex gap-2 px-2" id="player-bench-slots">
+                        <!-- Player Bench -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Hand -->
+            <div class="h-[180px] bg-slate-900 border-t border-slate-700 flex flex-col relative shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+                <div class="absolute top-2 left-4 z-20">
+                    <span class="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded">手札: <span id="player-hand-count" class="text-white">0</span>枚</span>
+                </div>
+                <div id="player-hand" class="hand-container w-full h-full items-end pb-2 pt-6">
+                    <!-- Cards injected here -->
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Custom Toast -->
+    <div id="toast-container" class="fixed bottom-32 z-[100] w-full pointer-events-none"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyBEwJfxABiedxcpMUVZHEjh3hCoMi1ypoA",
+            authDomain: "task-e184e.firebaseapp.com",
+            projectId: "task-e184e",
+            storageBucket: "task-e184e.firebasestorage.app",
+            messagingSenderId: "978971119576",
+            appId: "1:978971119576:web:81a93c0b081b2b47f22cad"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const provider = new GoogleAuthProvider();
+
+        const APP_ID = 'avengercb';
+
+        const TYPE_COLORS = {
+            '🍃': 'bg-green-400 border-green-600',
+            '🔥': 'bg-red-400 border-red-600',
+            '💧': 'bg-blue-400 border-blue-600',
+            '⚡': 'bg-yellow-400 border-yellow-600',
+            '🔮': 'bg-purple-400 border-purple-600',
+            '⚪': 'bg-slate-300 border-slate-500'
+        };
+
+        const CARD_DB = [
+            { id: 1, name: 'ボルタレオン', maxHp: 60, type: '⚡', attack: 'ライトニング', dmg: 30, flavor: '電気を纏う獣' },
+            { id: 2, name: 'イグニザード', maxHp: 50, type: '🔥', attack: 'フレイムバースト', dmg: 20, flavor: '炎を操る爬虫類' },
+            { id: 3, name: 'フロラザウルス', maxHp: 70, type: '🍃', attack: 'バインウィップ', dmg: 20, flavor: '植物と共生する怪物' },
+            { id: 4, name: 'アクアシェル', maxHp: 60, type: '💧', attack: 'ウォーターキャノン', dmg: 20, flavor: '硬い甲羅を持つ水亀' },
+            { id: 5, name: 'サイコロン', maxHp: 130, type: '🔮', attack: 'マインドブラスト', dmg: 60, flavor: '遺伝子操作で生まれた兵器' },
+            { id: 6, name: 'モルフォス', maxHp: 50, type: '⚪', attack: 'たいあたり', dmg: 10, flavor: '環境に適応する珍獣' },
+            { id: 7, name: 'パイロドレイク', maxHp: 150, type: '🔥', attack: 'インフェルノ', dmg: 90, flavor: '空を焦がす竜' },
+            { id: 8, name: 'ハイドロタンク', maxHp: 150, type: '💧', attack: 'ハイドロポンプ', dmg: 80, flavor: '圧倒的な水圧を放つ重装甲' },
+        ];
+
+        // 状態管理の大幅改修
+        let state = {
+            screen: 'home',
+            collection: [],
+            player: { deck: [], hand: [], active: null, bench: [null,null,null,null,null] },
+            cpu: { deck: [], hand: [], active: null, bench: [null,null,null,null,null] },
+            turn: 'player', // 'player' or 'cpu'
+            selectedIndex: null
+        };
+        let currentUser = null;
+        let isProcessing = false; // CPU行動中などのロック用
+
+        const DOM = {
+            loginOverlay: document.getElementById('login-overlay'),
+            btnLogin: document.getElementById('btn-login'),
+            btnLogout: document.getElementById('btn-logout'),
+            userName: document.getElementById('user-name'),
+            toastContainer: document.getElementById('toast-container'),
+            
+            // Screens
+            screens: {
+                home: document.getElementById('screen-home'),
+                collection: document.getElementById('screen-collection'),
+                pack: document.getElementById('screen-pack'),
+                battle: document.getElementById('screen-battle')
+            },
+            
+            // Battle UI
+            turnIndicator: document.getElementById('turn-indicator'),
+            btnEndTurn: document.getElementById('btn-end-turn'),
+            playerHand: document.getElementById('player-hand'),
+            playerActive: document.getElementById('player-active-slot'),
+            playerBench: document.getElementById('player-bench-slots'),
+            playerDeckCount: document.getElementById('player-deck-count'),
+            playerHandCount: document.getElementById('player-hand-count'),
+            btnAttack: document.getElementById('btn-attack'),
+            
+            oppActive: document.getElementById('opp-active-slot'),
+            oppBench: document.getElementById('opp-bench-slots'),
+            oppDeckCount: document.getElementById('opp-deck-count'),
+            oppHandCount: document.getElementById('opp-hand-count'),
+            
+            // Collection & Pack
+            collectionGrid: document.getElementById('collection-grid'),
+            collectionCount: document.getElementById('collection-count'),
+            packVisual: document.getElementById('pack-visual'),
+            packResultArea: document.getElementById('pack-result-area'),
+            openedCards: document.getElementById('opened-cards')
+        };
+
+        // --- Utils ---
+        window.showToast = (msg, isError = false) => {
+            const el = document.createElement('div');
+            el.className = `toast inline-block px-6 py-3 rounded-full shadow-2xl text-sm font-bold border-2 
+                            ${isError ? 'bg-red-900 border-red-500 text-red-100' : 'bg-slate-800 border-slate-600 text-white'}`;
+            el.innerText = msg;
+            DOM.toastContainer.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                el.style.transform = 'translate(-50%, 10px)';
+                setTimeout(() => el.remove(), 300);
+            }, 3000);
+        };
+
+        const createUUID = () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+
+        // --- Auth & Data ---
+        const handleAuth = async () => {
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    currentUser = user;
+                    DOM.loginOverlay.classList.add('hidden');
+                    DOM.btnLogin.classList.add('hidden');
+                    DOM.btnLogout.classList.remove('hidden');
+                    DOM.userName.innerText = user.displayName || 'Player';
+                    DOM.userName.classList.remove('hidden');
+                    await loadData();
+                } else {
+                    currentUser = null;
+                    DOM.loginOverlay.classList.remove('hidden');
+                    DOM.btnLogin.classList.remove('hidden');
+                    DOM.btnLogout.classList.add('hidden');
+                    DOM.userName.classList.add('hidden');
+                }
+            });
+        };
+
+        DOM.btnLogin.addEventListener('click', async () => {
+            try { await signInWithPopup(auth, provider); } 
+            catch (error) { showToast("ログイン失敗: " + error.message, true); }
+        });
+
+        DOM.btnLogout.addEventListener('click', () => {
+            signOut(auth);
+            state = { screen: 'home', collection: [], player: {deck:[], hand:[], active:null, bench:Array(5).fill(null)}, cpu: {deck:[], hand:[], active:null, bench:Array(5).fill(null)}, turn: 'player', selectedIndex: null };
+            render();
+        });
+
+        const getDocRef = () => currentUser ? doc(db, 'artifacts', APP_ID, 'users', currentUser.uid, 'gamestate', 'current') : null;
+
+        const loadData = async () => {
+            const ref = getDocRef();
+            if (!ref) return;
+            try {
+                const snap = await getDoc(ref);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    state.collection = data.collection || [];
+                    state.screen = 'home'; // ロード時はホームに戻る
+                    state.selectedIndex = null;
+                    isProcessing = false;
+                }
+                render();
+            } catch (error) { showToast("データ読み込み失敗", true); }
+        };
+
+        const saveData = async () => {
+            const ref = getDocRef();
+            if (!ref) return;
+            try { await setDoc(ref, { collection: state.collection }); } // バトル状態は保存せずコレクションのみ永続化
+            catch (error) {}
+        };
+
+        // --- Navigation ---
+        window.switchScreen = (screenName) => {
+            if(isProcessing) return;
+            state.screen = screenName;
+            Object.values(DOM.screens).forEach(el => el.classList.add('hidden'));
+            DOM.screens[screenName].classList.remove('hidden');
+            render();
+        };
+
+        // --- HTML Generators ---
+        const createCardHTML = (card, isSelected = false, isOpponent = false, extraId = "") => {
+            if (!card) return '';
+            const colorClass = TYPE_COLORS[card.type] || TYPE_COLORS['⚪'];
+            const selClass = isSelected ? 'selected' : '';
+            // 相手のカードが裏向き(hand/deck)の場合は中身を見せないなどの拡張もできるが、今回は場に出たカードのみ生成
+            
+            // HP Bar計算
+            const hpPercent = Math.max(0, (card.hp / card.maxHp) * 100);
+            const hpColor = hpPercent > 50 ? 'bg-green-500' : hpPercent > 20 ? 'bg-yellow-500' : 'bg-red-500';
+
+            return `
+                <div id="${extraId}" class="tcg-card w-24 h-36 sm:w-28 sm:h-40 rounded-xl flex flex-col p-1.5 select-none ${selClass} relative bg-white flex-shrink-0">
+                    <div class="flex justify-between items-center px-1 mb-1 border-b border-slate-200 pb-1">
+                        <span class="text-[9px] sm:text-[10px] font-black truncate max-w-[65%] text-slate-800">${card.name}</span>
+                        <span class="text-[9px] sm:text-[10px] font-bold text-red-600 whitespace-nowrap">HP ${card.hp}</span>
+                    </div>
+                    
+                    <!-- HP Bar -->
+                    <div class="w-full bg-slate-200 h-1 mb-1 rounded overflow-hidden">
+                        <div class="h-full ${hpColor} transition-all duration-300" style="width: ${hpPercent}%"></div>
+                    </div>
+
+                    <div class="${colorClass} flex-1 w-full rounded flex flex-col items-center justify-center shadow-inner relative overflow-hidden">
+                        <span class="text-3xl absolute opacity-20">${card.type}</span>
+                        <span class="text-xl z-10 drop-shadow-md">${card.type}</span>
+                    </div>
+                    <div class="mt-1 flex flex-col px-1 h-1/3 justify-end pb-1">
+                        <div class="flex justify-between items-end border-t border-slate-100 pt-1 mt-auto">
+                            <span class="text-[9px] sm:text-[10px] font-bold leading-tight text-slate-800">${card.attack}</span>
+                            <span class="text-[10px] sm:text-xs font-black text-slate-900">${card.dmg}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const createCardBackHTML = (sizeClass = "w-16 h-24") => {
+            return `
+                <div class="${sizeClass} bg-blue-800 rounded-lg border-2 border-blue-400 shadow-md flex items-center justify-center relative overflow-hidden">
+                     <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-30"></div>
+                     <span class="text-blue-300 font-bold text-xs opacity-50">CARD</span>
+                </div>
+            `;
+        }
+
+        // --- Modes ---
+        window.executeOpenPack = () => {
+            DOM.packVisual.classList.add('anim-pack-open');
+            setTimeout(() => {
+                const newCards = [];
+                for(let i=0; i<5; i++) {
+                    const baseCard = CARD_DB[Math.floor(Math.random() * CARD_DB.length)];
+                    newCards.push({ ...baseCard, hp: baseCard.maxHp, uid: createUUID() });
+                }
+                state.collection.push(...newCards);
+                saveData();
+                
+                DOM.openedCards.innerHTML = '';
+                newCards.forEach((card, idx) => {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'anim-pop-out opacity-0';
+                    wrap.style.animationDelay = `${idx * 0.15}s`;
+                    wrap.innerHTML = createCardHTML(card);
+                    DOM.openedCards.appendChild(wrap);
+                });
+                
+                DOM.packResultArea.classList.remove('hidden');
+                DOM.packVisual.classList.remove('anim-pack-open');
+            }, 1000);
+        };
+
+        window.resetPackScreen = () => {
+            DOM.packResultArea.classList.add('hidden');
+            DOM.openedCards.innerHTML = '';
+        };
+
+        const buildDeck = () => {
+            let deck = [];
+            for (let i = 0; i < 20; i++) {
+                const baseCard = CARD_DB[Math.floor(Math.random() * CARD_DB.length)];
+                deck.push({ ...baseCard, hp: baseCard.maxHp, uid: createUUID() });
+            }
+            return deck;
+        }
+
+        window.startBattle = () => {
+            state.player = { deck: buildDeck(), hand: [], active: null, bench: Array(5).fill(null) };
+            state.cpu = { deck: buildDeck(), hand: [], active: null, bench: Array(5).fill(null) };
+            state.turn = 'player';
+            state.selectedIndex = null;
+            isProcessing = false;
+
+            // 初期ドロー 5枚
+            for(let i=0; i<5; i++) {
+                state.player.hand.push(state.player.deck.pop());
+                state.cpu.hand.push(state.cpu.deck.pop());
+            }
+
+            switchScreen('battle');
+            showToast("バトル開始！あなたのターンです");
+        };
+
+        window.selectCard = (index) => {
+            if (state.turn !== 'player' || isProcessing) return;
+            state.selectedIndex = state.selectedIndex === index ? null : index;
+            render();
+        };
+
+        window.playToSlot = (type, benchIndex = 0) => {
+            if (state.turn !== 'player' || isProcessing || state.selectedIndex === null) return;
+            const card = state.player.hand[state.selectedIndex];
+
+            if (type === 'active') {
+                if (state.player.active) { showToast("バトル場には既にモンスターがいます", true); return; }
+                state.player.active = card;
+                showToast(`${card.name} をバトル場に出した！`);
+            } else if (type === 'bench') {
+                if (state.player.bench[benchIndex]) { showToast("そのベンチは埋まっています", true); return; }
+                state.player.bench[benchIndex] = card;
+            }
+
+            state.player.hand.splice(state.selectedIndex, 1);
+            state.selectedIndex = null;
+            render();
+        };
+
+        window.attack = async () => {
+            if (state.turn !== 'player' || isProcessing || !state.player.active) return;
+            isProcessing = true;
+            state.selectedIndex = null;
+            render();
+
+            const cardEl = document.getElementById('player-active-card-el');
+            if (cardEl) {
+                cardEl.classList.remove('anim-attack');
+                void cardEl.offsetWidth; 
+                cardEl.classList.add('anim-attack');
+            }
+
+            const dmg = state.player.active.dmg;
+            if (state.cpu.active) {
+                state.cpu.active.hp -= dmg;
+                showToast(`${state.player.active.name}の攻撃！ CPUの${state.cpu.active.name}に ${dmg} ダメージ！`);
+                
+                if (state.cpu.active.hp <= 0) {
+                    setTimeout(() => {
+                        showToast(`CPUの ${state.cpu.active.name} を倒した！`);
+                        state.cpu.active = null;
+                        render();
+                    }, 800);
+                }
+            } else {
+                showToast(`CPUの場が空だ！直接攻撃成功！`);
+                // 実際のゲームならここで勝利判定など
+            }
+
+            setTimeout(() => { endTurn(); }, 1500);
+        };
+
+        window.endTurn = () => {
+            if(state.turn !== 'player' || isProcessing && document.activeElement !== DOM.btnEndTurn) return; // Prevent double click unless forced
+            state.turn = 'cpu';
+            state.selectedIndex = null;
+            render();
+            runCPUTurn();
+        };
+
+        const runCPUTurn = async () => {
+            isProcessing = true;
+            showToast("CPUのターン...");
+            await new Promise(r => setTimeout(r, 1000));
+
+            // CPU Draw
+            if (state.cpu.deck.length > 0 && state.cpu.hand.length < 7) {
+                state.cpu.hand.push(state.cpu.deck.pop());
+            }
+
+            // CPU Play Card (Simple AI)
+            let actionTaken = false;
+            if (!state.cpu.active && state.cpu.hand.length > 0) {
+                state.cpu.active = state.cpu.hand.pop();
+                showToast(`CPUが ${state.cpu.active.name} を場に出した！`);
+                actionTaken = true;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            const emptyBench = state.cpu.bench.findIndex(c => c === null);
+            if (emptyBench !== -1 && state.cpu.hand.length > 0 && Math.random() > 0.3) {
+                state.cpu.bench[emptyBench] = state.cpu.hand.pop();
+                actionTaken = true;
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            // CPU Attack
+            if (state.cpu.active) {
+                const oppEl = document.getElementById('opp-active-card-el');
+                if(oppEl) {
+                    oppEl.classList.remove('anim-attack-opp');
+                    void oppEl.offsetWidth;
+                    oppEl.classList.add('anim-attack-opp');
+                }
+
+                const dmg = state.cpu.active.dmg;
+                if (state.player.active) {
+                    state.player.active.hp -= dmg;
+                    showToast(`CPUの攻撃！ ${state.player.active.name} に ${dmg} ダメージ！`, true);
+                    if (state.player.active.hp <= 0) {
+                        setTimeout(() => {
+                            showToast(`${state.player.active.name} は倒れてしまった...`, true);
+                            state.player.active = null;
+                            render();
+                        }, 800);
+                    }
+                } else {
+                    showToast(`CPUの直接攻撃を受けた！`, true);
+                }
+                await new Promise(r => setTimeout(r, 1500));
+            } else if (!actionTaken) {
+                 showToast("CPUは様子を見ている...");
+                 await new Promise(r => setTimeout(r, 1000));
+            }
+
+            // End CPU Turn
+            state.turn = 'player';
+            isProcessing = false;
+            if (state.player.deck.length > 0 && state.player.hand.length < 7) {
+                state.player.hand.push(state.player.deck.pop());
+                showToast("あなたのターン！ 1枚ドローしました");
+            } else {
+                showToast("あなたのターン！");
+            }
+            render();
+        };
+
+        const render = () => {
+            if (!currentUser) return; // Wait for auth
+
+            // --- Render Collection ---
+            if (state.screen === 'collection') {
+                DOM.collectionCount.innerText = state.collection.length;
+                DOM.collectionGrid.innerHTML = '';
+                if(state.collection.length === 0) {
+                    DOM.collectionGrid.innerHTML = '<p class="text-slate-400 p-4 col-span-full text-center">カードをまだ持っていません。パックを開封しましょう！</p>';
+                } else {
+                    state.collection.forEach(card => {
+                        const div = document.createElement('div');
+                        div.innerHTML = createCardHTML(card);
+                        DOM.collectionGrid.appendChild(div.firstElementChild); // div剥がし
+                    });
+                }
+            }
+
+            // --- Render Battle ---
+            if (state.screen === 'battle') {
+                // UI Status
+                if(state.turn === 'player') {
+                    DOM.turnIndicator.className = "text-sm font-bold px-3 py-1 rounded bg-blue-600 text-white border border-blue-400 shadow-[0_0_10px_rgba(37,99,235,0.8)]";
+                    DOM.turnIndicator.innerText = "🔵 あなたのターン";
+                    DOM.btnEndTurn.classList.remove('hidden');
+                } else {
+                    DOM.turnIndicator.className = "text-sm font-bold px-3 py-1 rounded bg-red-800 text-red-200 border border-red-600";
+                    DOM.turnIndicator.innerText = "🔴 CPUのターン";
+                    DOM.btnEndTurn.classList.add('hidden');
+                }
+
+                // Player Hand
+                DOM.playerHand.innerHTML = '';
+                state.player.hand.forEach((card, i) => {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'hand-item';
+                    const isSel = state.selectedIndex === i;
+                    // onclickをラッパーに付ける（HTML文字列生成時にエスケープ面倒なため）
+                    wrap.onclick = () => selectCard(i);
+                    wrap.innerHTML = createCardHTML(card, isSel);
+                    DOM.playerHand.appendChild(wrap);
+                });
+                DOM.playerHandCount.innerText = state.player.hand.length;
+                DOM.playerDeckCount.innerText = state.player.deck.length;
+
+                // Player Active
+                if (state.player.active) {
+                    DOM.playerActive.innerHTML = createCardHTML(state.player.active, false, false, "player-active-card-el");
+                    DOM.playerActive.classList.remove('droppable');
+                    if(state.turn === 'player' && !isProcessing) DOM.btnAttack.classList.remove('hidden');
+                    else DOM.btnAttack.classList.add('hidden');
+                } else {
+                    DOM.playerActive.innerHTML = `<span class="text-slate-400 text-sm font-bold pointer-events-none">バトル場</span>`;
+                    DOM.playerActive.classList.add('droppable');
+                    DOM.btnAttack.classList.add('hidden');
+                }
+
+                // Player Bench
+                DOM.playerBench.innerHTML = '';
+                state.player.bench.forEach((card, i) => {
+                    const slot = document.createElement('div');
+                    slot.className = `slot w-16 h-24 sm:w-20 sm:h-28 transform scale-95 transition-transform ${!card && state.selectedIndex !== null && state.turn === 'player' ? 'droppable' : ''}`;
+                    slot.onclick = () => playToSlot('bench', i);
+                    if (card) { slot.innerHTML = createCardHTML(card, false); slot.classList.remove('droppable'); } 
+                    else { slot.innerHTML = `<span class="text-[10px] text-slate-500 font-bold pointer-events-none">ベンチ</span>`; }
+                    DOM.playerBench.appendChild(slot);
+                });
+
+                // CPU Field
+                DOM.oppHandCount.innerText = state.cpu.hand.length;
+                DOM.oppDeckCount.innerText = state.cpu.deck.length;
+                
+                if (state.cpu.active) {
+                    DOM.oppActive.innerHTML = createCardHTML(state.cpu.active, false, true, "opp-active-card-el");
+                } else {
+                    DOM.oppActive.innerHTML = `<span class="text-slate-600 text-[10px] font-bold">CPU BATTLE</span>`;
+                }
+
+                DOM.oppBench.innerHTML = '';
+                state.cpu.bench.forEach(card => {
+                    const div = document.createElement('div');
+                    if(card) {
+                        div.innerHTML = createCardHTML(card);
+                        // Scale down for bench
+                        div.firstElementChild.classList.add('transform', 'scale-75', 'origin-top');
+                    } else {
+                        div.className = "w-12 h-16 bg-slate-800/50 rounded border border-red-500/20";
+                    }
+                    DOM.oppBench.appendChild(div.firstElementChild || div);
+                });
+            }
+        };
+
+        // Init App
+        handleAuth();
+
+    </script>
+</body>
+</html>
